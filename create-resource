@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const fs = require('fs');
+const inflection = require('inflection');
+process.env.CREATE_RESOURCE = true;
+const { adminFolder, tenantsFolder } = require('./config');
+const yargs = require('yargs/yargs');
+const { hideBin } = require('yargs/helpers');
+const argv = yargs(hideBin(process.argv))
+  .locale('en')
+  .usage('Usage: $0 <path> [options]')
+  .command('$0 <path>', 'Create API resource files', (yargs) => {
+    yargs.positional('path', {
+      describe: 'Resource path name (kebab-case) [REQUIRED]',
+      type: 'string'
+    });
+  })
+  .options({
+    i: { alias: 'id', describe: 'Resource identifier (primary key or unique field)', type: 'string' },
+    s: { alias: 'singular', describe: 'Singular name for resource (kebab-case)', type: 'string' },
+    t: { alias: 'timestamps', describe: 'Add columns \'createdAt\' \'and updatedAt\' in DB tables', type: 'boolean' },
+    u: { alias: 'underscored', describe: 'Use underscores in DB for table and fields names', type: 'boolean' },
+    admin: { describe: 'Use admin folder variable in require path, for multitenant mode', type: 'boolean' },
+    tenants: { describe: 'Use tenants folder variable in require path, for multitenant mode', type: 'boolean' },
+    separate: { describe: 'Use parent folder name in require path, for multitenant mode', type: 'boolean' },
+    f: { alias: 'folder', describe: 'Parent folder for resource, for multitenant mode', type: 'string' },
+    h: { alias: 'help' }
+  })
+  .help()
+  .version(false)
+  .wrap(100)
+  .argv;
+
+const resourcePath = argv.path.toLowerCase();
+if (!resourcePath) {
+  console.log('Resource path not provided. Exiting...');
+  process.exit(1);
+}
+const primaryKey = argv.i || 'id';
+let camelCasedResource = resourcePath.includes('-')
+  ? resourcePath.replace(/-([a-z])/g, function (g) { return g[1].toUpperCase(); })
+  : resourcePath;
+const singularResourcePath = argv.s ? argv.s.toLowerCase() : inflection.singularize(resourcePath);
+const isSingularProvided = (argv.s);
+const useTimestampsInDB = argv.t;
+const useUnderscoresInDB = argv.u;
+const isAdmin = argv.admin;
+const isTenants = Boolean(!isAdmin && argv.tenants);
+const isSeparate = Boolean(!isAdmin && !isTenants && argv.separate);
+const parentFolder = isAdmin ? adminFolder : isTenants ? tenantsFolder : isSeparate ? argv.f : '';
+if ((isSeparate) && !parentFolder) {
+  console.error('Parent folder option (-f, --folder) is required with --separate');
+  process.exit(1);
+}
+const singularCamelCasedResource = singularResourcePath.includes('-')
+  ? singularResourcePath.replace(/-([a-z])/g, function (g) { return g[1].toUpperCase(); })
+  : singularResourcePath;
+const pascalCasedResource = camelCasedResource.charAt(0).toUpperCase() + camelCasedResource.slice(1);
+const entityName = singularResourcePath.charAt(0).toUpperCase() + singularResourcePath.slice(1).replace(/-/g, ' ');
+
+const files = {
+  controller: `'use strict';
+
+const ${camelCasedResource}Service = require('./${resourcePath}.service');
+const { CrudController } = require('@shared/layers/crud.controller');
+
+class ${pascalCasedResource}Controller extends CrudController {
+
+}
+
+module.exports = new ${pascalCasedResource}Controller(${camelCasedResource}Service, '${isSeparate ? parentFolder + '/' : ''}${resourcePath}', '${primaryKey}'
+${isSingularProvided ? ' ' : '  //'} , {
+  //   //* (Optional) Name in SINGULAR to be used in response messages
+  //   //* By default, path without final 's', spaces instead hyphens and first letter capitalized
+${isSingularProvided ? ' ' : '  //'}   entityName: '${entityName}',
+  //   //* (Optional) Entity gender for translated response messages: 'male' or 'female'
+  //   gender: 'male',
+  //   //* (Optional) Roles that have access to actions and additional actions, unless specific roles are set for them
+  //   //* Built-in roles: 'any' for open access, 'authenticated' for autheticated users
+  //   roles: ['any'],
+  //   //* (Optional) Actions: String notation
+  //   actions: ['list', 'read', 'create', 'update', 'delete'],
+  //   //* (Optional) Actions: Object notation
+  //   actions: [
+  //     { name: 'list', roles: ['any'] },
+  //     { name: 'read', roles: ['any'] },
+  //     { name: 'create', roles: ['any'] },
+  //     { name: 'update', roles: ['any'] },
+  //     { name: 'delete', roles: ['any'] }
+  //   ],
+  //   //* (Optional) Filters allowed in query params. Other than these will be ignored.
+  //   filters: ['limit', 'offset', 'order'],
+  //   //* (Optional) Additional actions to include
+  //   additionalActions: [
+  //     {
+  //       //* Custom action name (it usually matches custom method name)
+  //       name: 'doSomething',
+  //       //* HTTP method to execute the action: get, post, patch, delete...
+  //       method: 'get',
+  //       //* (Optional) Array of class methods names to be executed for this path
+  //       //* By default it executes the method named as action name
+  //       middlewares: ['doSomething'],
+  //       //* (Optional) Roles allowed to perform the action
+  //       roles: ['any'],
+  //       //* (Optional) Path name to be used (instead of action name)
+  //       //* Usually needed to keep paths as kebab-case and method names as camelCase
+  //       path: 'do-something'
+  //     }
+  //   ],
+  //   \/\/* (Optional) Function that returns the final ${singularCamelCasedResource} object that will be sent as response
+  //   mapEntity: function (${singularCamelCasedResource}, req, res) {
+  //     \/\/* Your code to map ${singularCamelCasedResource} goes here
+  //     return ${singularCamelCasedResource};
+  //   },
+  //   //* (Optional) Arguments passed as options to services methods
+  //   serviceArgs: {
+  //     scope: 'defaultScope',
+  //     ignoreSerialPk: true,
+  //     createAssociatedEntities: false,
+  //     updateAssociations: true
+  //   },
+  //   //* (Optional) Nested controllers for nested routes
+  //   children: [
+  //     {
+  //       //* Instance of CrudController to be nested
+  //       controller: xxxController,
+  //       //* Name of the filter key in nested controller that link with parent controller.
+  //       //* It may be equal to a foreign key in model (i.e. userId)
+  //       //* or a nested key from an associated model referenced with dot notation (i.e. users.id)
+  //       //* Foreign keys are only valid for 1:M associations, while dot notation is valid for 1:M and M:N
+  //       filterKey: 'string'
+  //     }
+  //   ]
+${isSingularProvided ? ' ' : '  //'} }
+);
+`,
+  service: `'use strict';
+
+const ${camelCasedResource}Repository = require('./${resourcePath}.repository');
+const { CrudService } = require('@shared/layers/crud.service');
+
+class ${pascalCasedResource}Service extends CrudService {
+
+}
+
+module.exports = new ${pascalCasedResource}Service(${camelCasedResource}Repository);
+`,
+  repository: `'use strict';
+
+const ${camelCasedResource}Model = require('./${resourcePath}.model');
+const { CrudRepository } = require('@shared/layers/crud.repository');
+
+class ${pascalCasedResource}Repository extends CrudRepository {
+  
+}
+
+module.exports = new ${pascalCasedResource}Repository(${camelCasedResource}Model);
+`,
+  model: `'use strict';
+
+const { DataTypes } = require('sequelize');
+const sequelize = require('@config/sequelize.config');
+const { notNull, isInt } = require('@config/validations.config');
+
+const ${pascalCasedResource}Model = sequelize.define(
+  '${singularCamelCasedResource}',
+  {
+    ${primaryKey}: { type: DataTypes.INTEGER, autoIncrement: true, primaryKey: true, allowNull: false, validate: { notNull, isInt } },
+  },
+  {${isSingularProvided
+    ? '\n    name: { singular: \'' + singularCamelCasedResource + '\', plural: \'' + camelCasedResource + '\' }'
+    : ''}${isSingularProvided && (useTimestampsInDB || useUnderscoresInDB || isAdmin) ? ',' : ''}` +
+    `${useTimestampsInDB ? '\n    timestamps: true' : ''}${useTimestampsInDB && (useUnderscoresInDB || isAdmin) ? ',' : ''}` +
+    `${useUnderscoresInDB ? '\n    underscored: true' : ''}${useUnderscoresInDB && isAdmin ? ',' : ''}` +
+    `${isAdmin ? '\n    schema: \'admin\'' : ''}` +
+    `${isSingularProvided || useTimestampsInDB || useUnderscoresInDB || isAdmin ? '\n  }' : '}'}` +
+`
+);
+
+// ${pascalCasedResource}Model.associate = function() {
+//   const model = modelName => this.sequelize.model(modelName);
+//   
+//   
+// };
+
+module.exports = ${pascalCasedResource}Model;
+`
+};
+
+try {
+  const basePath = `./routes/api${(isAdmin || isTenants || isSeparate) ? '/' + parentFolder : ''}`;
+  const path = `${basePath}/${resourcePath}`;
+  console.log(`Creating resource '${resourcePath}' in ${path}`);
+  if (!fs.existsSync(basePath)) fs.mkdirSync(basePath);
+  if (!fs.existsSync(path)) fs.mkdirSync(path);
+
+  let lineBreak = '\n';
+  // Change linebreak format from LF to CRLF if running on Windows
+  if (process.platform === 'win32') {
+    lineBreak = '\r\n';
+    Object.keys(files).forEach(key => files[key] = files[key].replace(/\n/g, lineBreak));
+  }
+
+  for (const fileType in files) {
+    const file = `${path}/${resourcePath}.${fileType}.js`;
+    fs.writeFileSync(file, files[fileType]);
+    console.log(`File ${file}.js created!`);
+  }
+
+  const routerFile = fs.readFileSync('./routes/api/api.router.js').toString().split(lineBreak);
+  const lastImportedControllerIndex = routerFile
+    .reduce((lastIndex, line, index) => line.includes('require') ? index : lastIndex, 0);
+  const lastRegisteredControllerIndex = routerFile
+    .reduce((lastIndex, line, index) => line.includes('Controller') &&
+      !line.includes('require') &&
+      !line.includes('unshift') ? index : lastIndex, 0);
+
+  if (!routerFile[lastRegisteredControllerIndex].trim().endsWith(',')) {
+    routerFile[lastRegisteredControllerIndex] += ',';
+  }
+
+  routerFile.splice(
+    lastRegisteredControllerIndex + 1,
+    0,
+    `    ${camelCasedResource}Controller,`);
+
+  const requirePath = (isAdmin || isTenants)
+    ? `\`.\${${isAdmin ? 'adminFolder' : 'tenantsFolder'}}/${resourcePath}/${resourcePath}.controller.js\``
+    : `'.${isSeparate ? '/' + parentFolder : ''}/${resourcePath}/${resourcePath}.controller.js'`;
+
+  routerFile.splice(
+    lastImportedControllerIndex + 1,
+    0,
+    `const ${camelCasedResource}Controller = require(${requirePath});`);
+
+  if (isTenants) {
+    routerFile[3] = 'const { isMultitenantEnabled, adminFolder, tenantsFolder } = require(\'@config\');';
+  }
+
+  fs.writeFileSync('./routes/api/api.router.js', routerFile.join(lineBreak));
+  console.log('File ./routes/api/api.router.js edited!');
+
+  console.log('DONE!');
+} catch (error) {
+  console.error('ERROR:', error.message);
+}

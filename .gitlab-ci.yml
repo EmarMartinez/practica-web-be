@@ -1,0 +1,19 @@
+build:
+  image: docker:stable
+  stage: build
+  services:
+    - docker:stable-dind
+  variables:
+    # $CI_COMMIT_REF_SLUG equals to branch name
+    IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build -t $IMAGE_TAG-alpine --build-arg TAG=gallium-alpine3.15 .
+    - docker push $IMAGE_TAG-alpine
+    - docker build -t $IMAGE_TAG-lts-slim --build-arg TAG=gallium-bullseye-slim .
+    - docker push $IMAGE_TAG-lts-slim
+    - docker build -t $IMAGE_TAG-lts --build-arg TAG=gallium-bullseye .
+    - docker push $IMAGE_TAG-lts
+  only:
+    - master
+    - develop

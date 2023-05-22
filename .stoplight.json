@@ -1,0 +1,23 @@
+{
+  "exclude": [],
+  "formats": {
+    "openapi": {
+      "rootDir": "swagger",
+      "include": [
+        "**"
+      ]
+    },
+    "json_schema": {
+      "rootDir": "swagger",
+      "include": [
+        "**"
+      ]
+    },
+    "markdown": {
+      "rootDir": "docs"
+    },
+    "image": {
+      "rootDir": "swagger/images"
+    }
+  }
+}

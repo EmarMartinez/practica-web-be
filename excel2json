@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+
+'use strict';
+
+const excelToJson = require('convert-excel-to-json');
+const fs = require('fs');
+
+let excelFilenames = fs.readdirSync('./data')
+  .filter(filename => filename.endsWith('data.xlsx') && !filename.startsWith('~$'));
+console.log('Excel files read:', excelFilenames.join(', '));
+
+console.log('Converting Excel files to JSON...');
+
+for (const filename of excelFilenames) {
+  console.log(`Converting ${filename} to JSON`);
+
+  const book = excelToJson({
+    sourceFile: `./data/${filename}`,
+    header: { rows: 1 },
+    columnToKey: { '*': '{{columnHeader}}' }
+  });
+
+  for (let sheet in book) {
+    try {
+      book[sheet] = book[sheet].map(row => {
+        for (const key in row) {
+          // If value is between quotation marks, parse as string
+          if (
+            typeof row[key] === 'string' &&
+            row[key].startsWith('"') &&
+            row[key].endsWith('"')
+          ) {
+            row[key] = row[key].slice(1, -1).toString();
+          }
+          // If value is between double brackets, parse as array of 2-item arrays
+          // for many-to-many associations with values for join table
+          else if (
+            typeof row[key] === 'string' &&
+            row[key].startsWith('[[') &&
+            row[key].endsWith(']]')
+          ) {
+            row[key] = row[key].slice(2, -2)
+              .split('],[')
+              .map(item => {
+                let [id, ...values] = item.split(',');
+                if (id.startsWith('"') &&
+                  id.endsWith('"')) {
+                  id = id.slice(1, -1).toString();
+                } else {
+                  id = isNaN(id) ? id : parseFloat(id) || parseInt(id);
+                }
+                const valuesObj = {};
+                values.forEach(item => {
+                  let [key, value] = item.split('=');
+                  if (value.startsWith('"') &&
+                    value.endsWith('"')) {
+                    value = value.slice(1, -1).toString();
+                  } else if (['true', 'false', 'null'].includes(value)) {
+                    value = JSON.parse(value);
+                  } else {
+                    value = isNaN(value) ? value : parseFloat(value) || parseInt(value);
+                  }
+                  valuesObj[key] = value;
+                });
+                return [id, valuesObj];
+              });
+          }
+          // If value is between single brackets, parse as array
+          // for one-to-many and many-to-many associations
+          else if (
+            typeof row[key] === 'string' &&
+            row[key].startsWith('[') &&
+            row[key].endsWith(']') &&
+            row[key].length > 2
+          ) {
+            row[key] = row[key].slice(1, -1)
+              .split(',')
+              .map(item => {
+                if (item.startsWith('"') &&
+                  item.endsWith('"')) {
+                  return item.slice(1, -1).toString();
+                } else {
+                  return isNaN(item) ? item : parseFloat(item) || parseInt(item);
+                }
+              });
+          }
+          // Parse true, false, null and empty array values
+          // If value is between curly braces, parse as object
+          else if (
+            ['true', 'false', 'null', '[]'].includes(row[key]) ||
+            (
+              typeof row[key] === 'string' &&
+              row[key].startsWith('{') &&
+              row[key].endsWith('}')
+            )
+          ) {
+            row[key] = JSON.parse(row[key]);
+          }
+        }
+        return row;
+      });
+      const filename = `${sheet}.data.json`;
+      fs.writeFileSync(`./data/${filename}`, JSON.stringify(book[sheet], null, 2));
+      console.log(`Converted: ${filename}`);
+    } catch (err) {
+      console.error(`Error in sheet ${sheet}:`, err);
+    }
+  }
+}
+
+console.log('Conversion finished!');
